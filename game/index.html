@@ -161,7 +161,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;margin-top:18px}
     <main class="grid">
       <section class="panel admin-only">
         <div class="sectionhead">
-          <div><h2>Team Dashboard｜六組戰況</h2><div class="sub">點選組別後，可替該組購買 Solution 或手動調整 Resource。</div></div>
+          <div><h2>Team Dashboard｜七組戰況</h2><div class="sub">點選組別後，可替該組購買 Solution 或手動調整 Resource。</div></div>
         </div>
         <div class="teamgrid" id="teamGrid"></div>
       </section>
@@ -185,7 +185,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;margin-top:18px}
         </div>
         <div class="problem" id="problemCard">
           <div class="k">WAITING｜等待出題</div>
-          <h3>先讓六組購買第一輪 Solution。</h3>
+          <h3>先讓第 2–7 組購買第一輪 Solution；第 1 組預設停用。</h3>
           <p>準備好後，由老師翻出第一張 Problem Card。</p>
           <div class="hint admin-only" id="hintBox" style="display:none"></div>
         </div>
@@ -263,16 +263,21 @@ const problems=[
 ];
 function fresh(){
  return {
-  teams:Array.from({length:6},(_,i)=>({id:i,name:"第 "+(i+1)+" 組",resource:5,impact:0,cards:[]})),
+  teams:Array.from({length:7},(_,i)=>({id:i,name:"第 "+(i+1)+" 組",resource:i===0?0:5,impact:0,cards:[],enabled:i!==0})),
   stock:Object.fromEntries(defs.map(d=>[d.id,d.stock])),
-  active:0,round:0,current:null,currentHint:"",history:["遊戲開始：六組各有 5 枚 Resource。"],timer:90,custom:false
+  active:1,round:0,current:null,currentHint:"",history:["遊戲開始：第 2–7 組各有 5 枚 Resource；第 1 組預設停用。"],timer:90,custom:false
  };
 }
 let state,undoStack=[],timerHandle=null;
 const q=id=>document.getElementById(id);
 function load(){
  try{state=JSON.parse(localStorage.getItem(KEY))||fresh()}catch{state=fresh()}
- if(!state.teams||state.teams.length!==6)state=fresh();
+ if(!state.teams||state.teams.length!==7){
+   state=fresh();
+ }else{
+   state.teams=state.teams.map((t,i)=>({...t,enabled:typeof t.enabled==="boolean"?t.enabled:i!==0}));
+   if(!state.teams[state.active]||!state.teams[state.active].enabled)state.active=1;
+ }
 }
 function snapshot(){undoStack.push(JSON.stringify(state));if(undoStack.length>30)undoStack.shift()}
 function save(log){
@@ -287,22 +292,44 @@ function teamCardNames(t){return t.cards.length?t.cards.map(id=>defs.find(d=>d.i
 function renderTeams(){
  const box=q("teamGrid");if(!box)return;box.innerHTML="";
  state.teams.forEach((t,i)=>{
-  const d=document.createElement("div");d.className="team"+(i===state.active?" active":"");
-  d.innerHTML='<div class="teamtop"><div class="teamname">'+t.name+'</div><button class="btn small choose">選取</button></div>'+
+  const d=document.createElement("div");
+  d.className="team"+(i===state.active&&t.enabled?" active":"");
+  if(!t.enabled)d.style.opacity=".48";
+  d.innerHTML='<div class="teamtop"><div class="teamname">'+t.name+(t.enabled?'':'（停用）')+'</div><button class="btn small choose">'+(t.enabled?'選取':'啟用')+'</button></div>'+
    '<div class="teamstats"><span class="badge resource">Resource '+t.resource+'</span><span class="badge impact">Impact '+t.impact+'</span></div>'+
    '<div class="cardsline">'+teamCardNames(t)+'</div>'+
-   '<div class="teamactions"><button class="btn small rplus">Resource +1</button><button class="btn small rminus">-1</button><button class="btn small iplus">Impact +1</button></div>';
-  d.querySelector(".choose").onclick=()=>{state.active=i;save();};
+   '<div class="teamactions"><button class="btn small rplus">Resource +1</button><button class="btn small rminus">-1</button><button class="btn small iplus">Impact +1</button><button class="btn small toggle">'+(t.enabled?'停用':'啟用')+'</button></div>';
+  d.querySelector(".choose").onclick=()=>{
+    if(!t.enabled){
+      action(t.name+" 啟用",()=>{t.enabled=true;if(t.resource===0)t.resource=5;state.active=i;});
+    }else{
+      state.active=i;save();
+    }
+  };
+  ["rplus","rminus","iplus"].forEach(cls=>d.querySelector("."+cls).disabled=!t.enabled);
   d.querySelector(".rplus").onclick=()=>action(t.name+" Resource +1",()=>t.resource++);
   d.querySelector(".rminus").onclick=()=>action(t.name+" Resource -1",()=>t.resource=Math.max(0,t.resource-1));
   d.querySelector(".iplus").onclick=()=>action(t.name+" Impact +1",()=>t.impact++);
+  d.querySelector(".toggle").onclick=()=>action(t.name+(t.enabled?" 停用":" 啟用"),()=>{
+    t.enabled=!t.enabled;
+    if(t.enabled&&t.resource===0)t.resource=5;
+    if(!t.enabled&&state.active===i){
+      const next=state.teams.findIndex(x=>x.enabled);
+      state.active=next>=0?next:0;
+    }
+  });
   box.appendChild(d);
  });
- q("activeTeamText").textContent="目前操作："+state.teams[state.active].name+"｜Resource "+state.teams[state.active].resource;
+ const at=state.teams[state.active];
+ q("activeTeamText").textContent=at&&at.enabled?"目前操作："+at.name+"｜Resource "+at.resource:"目前沒有啟用中的組別";
 }
 function renderMarket(){
  const box=q("marketGrid");if(!box)return;box.innerHTML="";
  const team=state.teams[state.active];
+ if(!team||!team.enabled){
+  box.innerHTML='<div class="sub">請先選取一個已啟用組別。</div>';
+  return;
+ }
  defs.forEach(s=>{
   const d=document.createElement("div");d.className="sol";
   d.innerHTML='<div class="soltop"><div><div class="solname">'+s.name+'</div><div class="soldesc">'+s.desc+'</div></div><span class="price">'+s.cost+' Resource</span></div>'+
@@ -316,7 +343,7 @@ function renderMarket(){
 function renderProblem(){
  const box=q("problemCard");
  if(!state.current){
-  box.innerHTML='<div class="k">WAITING｜等待出題</div><h3>先讓六組購買第一輪 Solution。</h3><p>準備好後，由老師翻出第一張 Problem Card。</p><div class="hint admin-only" id="hintBox" style="display:none"></div>';
+  box.innerHTML='<div class="k">WAITING｜等待出題</div><h3>先讓第 2–7 組購買第一輪 Solution；第 1 組預設停用。</h3><p>準備好後，由老師翻出第一張 Problem Card。</p><div class="hint admin-only" id="hintBox" style="display:none"></div>';
  }else{
   box.innerHTML='<div class="k">'+(state.custom?"CUSTOM PROBLEM｜老師臨時題":"ROUND "+Math.max(1,state.round))+'</div><h3>'+esc(state.current.title)+'</h3><p>'+esc(state.current.text)+'</p><div class="hint admin-only" id="hintBox" style="display:none">'+esc(state.currentHint||"沒有預設提示，依學生理由判斷。")+'</div>';
  }
@@ -325,7 +352,7 @@ function renderProblem(){
 }
 function renderJudge(){
  const box=q("judgeGrid");if(!box)return;box.innerHTML="";
- state.teams.forEach(t=>{
+ state.teams.filter(t=>t.enabled).forEach(t=>{
   const d=document.createElement("div");d.className="judge";
   d.innerHTML='<div class="judgehead"><b>'+t.name+'</b><span class="badge impact">Impact '+t.impact+'</span></div><div class="reason">'+teamCardNames(t)+'</div>';
   const line=document.createElement("div");line.className="toolbar";
@@ -339,14 +366,14 @@ function renderJudge(){
  });
 }
 function renderLeaderboard(){
- const sorted=[...state.teams].sort((a,b)=>b.impact-a.impact||b.resource-a.resource||a.id-b.id);
+ const sorted=state.teams.filter(t=>t.enabled).sort((a,b)=>b.impact-a.impact||b.resource-a.resource||a.id-b.id);
  const box=q("leaderList");if(!box)return;box.innerHTML="";
  sorted.forEach((t,i)=>{
   const d=document.createElement("div");d.className="rank";
   d.innerHTML='<div class="n">'+(i+1)+'</div><div><b>'+t.name+'</b><div class="sub">'+t.cards.length+' Solutions</div></div><div class="rankscore">Impact <b>'+t.impact+'</b><br>Resource '+t.resource+'</div>';
   box.appendChild(d);
  });
- q("leaderStat").textContent=sorted[0].impact===0?"—":sorted[0].name;
+ q("leaderStat").textContent=!sorted.length||sorted[0].impact===0?"—":sorted[0].name;
 }
 function renderHistory(){const box=q("history");if(!box)return;box.innerHTML=state.history.map(x=>"<div>"+esc(x)+"</div>").join("")}
 function renderTimer(){if(q("timerText"))q("timerText").textContent=String(Math.floor(state.timer/60)).padStart(2,"0")+":"+String(state.timer%60).padStart(2,"0")}
